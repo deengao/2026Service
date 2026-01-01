@@ -199,6 +199,28 @@ body {
   display: none;
 }
 
+.tapHint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 58px);
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  animation: tapHintPulse 1.15s ease-in-out infinite;
+}
+
+.tapHint.isHidden {
+  display: none;
+}
+
 .meatCounter {
   position: absolute;
   right: calc(env(safe-area-inset-right) + 14px);
@@ -326,6 +348,12 @@ body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes tapHintPulse {
+  0% { transform: translateX(-50%) scale(1); opacity: 0.92; }
+  50% { transform: translateX(-50%) scale(1.04); opacity: 1; }
+  100% { transform: translateX(-50%) scale(1); opacity: 0.92; }
 }
 
 .crawlStage {

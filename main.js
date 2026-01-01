@@ -145,6 +145,7 @@ const ui = {
   loader: document.getElementById("loader"),
   loaderText: document.getElementById("loaderText"),
   soundHint: document.getElementById("soundHint"),
+  tapHint: document.getElementById("tapHint"),
   meatCounter: document.getElementById("meatCounter"),
   meatCountNum: document.getElementById("meatCountNum"),
   meatIcon: document.getElementById("meatIcon"),
@@ -172,6 +173,29 @@ function setSoundHint(visible) {
 function setMeatCounterVisible(visible) {
   if (!ui.meatCounter) return;
   ui.meatCounter.classList.toggle("isHidden", !visible);
+}
+
+function setTapHintVisible(visible) {
+  if (!ui.tapHint) return;
+  ui.tapHint.classList.toggle("isHidden", !visible);
+}
+
+let tapHintTimer = 0;
+let tapHintDismissed = false;
+function showTapHint() {
+  if (!MEAT_COUNTER.enabled) return;
+  if (!ui.tapHint) return;
+  if (tapHintDismissed) return;
+
+  setTapHintVisible(true);
+  if (tapHintTimer) window.clearTimeout(tapHintTimer);
+  tapHintTimer = window.setTimeout(() => setTapHintVisible(false), 12000);
+}
+
+function dismissTapHint() {
+  tapHintDismissed = true;
+  if (tapHintTimer) window.clearTimeout(tapHintTimer);
+  setTapHintVisible(false);
 }
 
 function setMeatCount(n) {
@@ -867,6 +891,8 @@ function collectMeatItem(item) {
   if (!item || !item.active) return;
   if (meatCount >= MEAT_COUNTER.max) return;
 
+  dismissTapHint();
+
   item.active = false;
   item.mesh.visible = false;
 
@@ -922,6 +948,9 @@ function onCanvasTapCollect(e) {
   if (!MEAT_COUNTER.enabled) return;
   if (moveMode !== "run") return;
   if (meatCount >= MEAT_COUNTER.max) return;
+
+  // Any tap attempt during run counts as "got it".
+  dismissTapHint();
 
   const rect = ui.canvas.getBoundingClientRect();
   const x = (e.clientX - rect.left) / rect.width;
@@ -1170,6 +1199,9 @@ function setAll(mode) {
     setMeatCount(0);
     setMeatCounterVisible(true);
     bumpMeatCounter();
+
+    tapHintDismissed = false;
+    showTapHint();
   }
 
   for (const key of ["garrosh", "butcher"]) {
@@ -1315,6 +1347,7 @@ async function boot() {
   const script = (await loadUserScript()) ?? DEFAULT_SCRIPT;
 
   setMeatCounterVisible(false);
+  setTapHintVisible(false);
   meatCount = 0;
   setMeatCount(0);
 

@@ -428,20 +428,33 @@ function makeRoadSegment() {
 
   const asphalt = new THREE.Mesh(
     new THREE.BoxGeometry(ROAD.width, 0.12, ROAD.segLength),
-    // Dirt track
-    new THREE.MeshStandardMaterial({ color: 0xb7925a, roughness: 0.95, metalness: 0.0 })
+    // Worn dirt road
+    new THREE.MeshStandardMaterial({ color: 0x7a613f, roughness: 1.0, metalness: 0.0 })
   );
   asphalt.position.y = 0.06;
   asphalt.receiveShadow = true;
   g.add(asphalt);
 
-  const stripeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0.0 });
-  const stripeGeo = new THREE.BoxGeometry(0.14, 0.04, ROAD.segLength * 0.18);
-  for (let i = -2; i <= 2; i++) {
-    const stripe = new THREE.Mesh(stripeGeo, stripeMat);
-    stripe.receiveShadow = true;
-    stripe.position.set(i * 1.2, 0.14, 0);
-    g.add(stripe);
+  // Long ruts + patches (no cross-road stripes)
+  const rutMat = new THREE.MeshStandardMaterial({ color: 0x5c4a31, roughness: 1.0, metalness: 0.0 });
+  const rutGeo = new THREE.BoxGeometry(0.55, 0.02, ROAD.segLength * 0.96);
+  const rutOffsets = [-ROAD.width * 0.18, ROAD.width * 0.18];
+  for (const x of rutOffsets) {
+    const rut = new THREE.Mesh(rutGeo, rutMat);
+    rut.receiveShadow = true;
+    rut.position.set(x, 0.13, 0);
+    g.add(rut);
+  }
+
+  const patchMat = new THREE.MeshStandardMaterial({ color: 0x6a5336, roughness: 1.0, metalness: 0.0 });
+  for (let i = 0; i < 6; i++) {
+    const w = 0.7 + Math.random() * 1.6;
+    const l = 1.6 + Math.random() * 4.2;
+    const patch = new THREE.Mesh(new THREE.BoxGeometry(w, 0.015, l), patchMat);
+    patch.receiveShadow = true;
+    patch.position.set((Math.random() - 0.5) * (ROAD.width * 0.8), 0.12, (Math.random() - 0.5) * (ROAD.segLength * 0.75));
+    patch.rotation.y = (Math.random() - 0.5) * 0.22;
+    g.add(patch);
   }
 
   return g;
@@ -473,6 +486,249 @@ scene.add(meat.group);
 
 let meatCount = 0;
 let celebrated200 = false;
+
+const FX = {
+  enabled: true,
+  birdsOnRunStart: true,
+  angelBurstOnRunStart: true,
+  victoryMeatRain: true,
+};
+
+const fx = {
+  group: new THREE.Group(),
+  birds: [],
+  halos: [],
+  burst: null,
+  victoryRainUntil: 0,
+  victoryRainAcc: 0,
+};
+scene.add(fx.group);
+
+// --- Birds (simple wing flaps) ---
+const birdGeo = new THREE.BoxGeometry(0.35, 0.03, 0.12);
+const birdMat = new THREE.MeshBasicMaterial({ color: 0x0c0c0c });
+
+function spawnBird({ x, y, z, vx, vz, ttl }) {
+  const root = new THREE.Group();
+  const left = new THREE.Mesh(birdGeo, birdMat);
+  const right = new THREE.Mesh(birdGeo, birdMat);
+  left.position.set(-0.22, 0, 0);
+  right.position.set(0.22, 0, 0);
+  root.add(left, right);
+
+  root.position.set(x, y, z);
+  root.rotation.y = Math.atan2(vx, vz);
+  root.scale.setScalar(1.1 + Math.random() * 0.6);
+
+  fx.group.add(root);
+  fx.birds.push({ root, left, right, vx, vz, phase: Math.random() * Math.PI * 2, life: ttl, ttl });
+}
+
+function updateBirds(dt) {
+  if (fx.birds.length === 0) return;
+  for (let i = fx.birds.length - 1; i >= 0; i--) {
+    const b = fx.birds[i];
+    b.life -= dt;
+    if (b.life <= 0) {
+      fx.group.remove(b.root);
+      fx.birds.splice(i, 1);
+      continue;
+    }
+    b.phase += dt * 10.5;
+    const flap = Math.sin(b.phase) * 0.55;
+    b.left.rotation.z = flap;
+    b.right.rotation.z = -flap;
+    b.root.position.x += b.vx * dt;
+    b.root.position.z += b.vz * dt;
+    // Slight bob
+    b.root.position.y += Math.sin(b.phase * 0.7) * dt * 0.6;
+  }
+}
+
+function triggerBirdFlyover() {
+  if (!FX.enabled || prefersReducedMotion || !FX.birdsOnRunStart) return;
+
+  const followerZ = actors.butcher.root?.position.z ?? actors.garrosh.root?.position.z ?? camera.position.z;
+  const z0 = followerZ - 34;
+  const count = 9;
+  for (let i = 0; i < count; i++) {
+    const fromLeft = Math.random() < 0.5;
+    const x = fromLeft ? -10.5 : 10.5;
+    const y = 11.0 + Math.random() * 7.0;
+    const z = z0 - Math.random() * 26;
+    const vx = (fromLeft ? 1 : -1) * (5.2 + Math.random() * 4.8);
+    const vz = -(1.5 + Math.random() * 2.5);
+    const ttl = 2.6 + Math.random() * 1.2;
+    spawnBird({ x, y, z, vx, vz, ttl });
+  }
+}
+
+// --- Angel / halo + blast burst ---
+const haloGeo = new THREE.RingGeometry(0.38, 0.58, 24);
+const haloMat = new THREE.MeshBasicMaterial({
+  color: 0xffd666,
+  transparent: true,
+  opacity: 0.0,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+
+function spawnHaloAt(target, yOff = 2.35) {
+  if (!target) return;
+  const mesh = new THREE.Mesh(haloGeo, haloMat.clone());
+  mesh.position.set(target.position.x, yOff, target.position.z);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.scale.setScalar(0.6);
+  fx.group.add(mesh);
+  fx.halos.push({ mesh, target, life: 1.15, ttl: 1.15, yOff });
+}
+
+function updateHalos(dt) {
+  if (fx.halos.length === 0) return;
+  for (let i = fx.halos.length - 1; i >= 0; i--) {
+    const h = fx.halos[i];
+    h.life -= dt;
+    if (h.life <= 0) {
+      fx.group.remove(h.mesh);
+      fx.halos.splice(i, 1);
+      continue;
+    }
+
+    const t = 1 - h.life / h.ttl;
+    const fadeIn = Math.min(1, t / 0.18);
+    const fadeOut = Math.min(1, (1 - t) / 0.35);
+    const alpha = 0.85 * fadeIn * fadeOut;
+    h.mesh.material.opacity = alpha;
+    if (h.target) {
+      h.mesh.position.x = h.target.position.x;
+      h.mesh.position.z = h.target.position.z;
+      h.mesh.position.y = h.yOff + 0.08 * Math.sin(t * Math.PI * 2);
+    }
+    const s = 0.6 + t * 0.8;
+    h.mesh.scale.setScalar(s);
+    h.mesh.rotation.z += dt * 1.8;
+  }
+}
+
+function spawnRunBlast() {
+  if (!FX.enabled || prefersReducedMotion) return;
+
+  // Recreate each time (short-lived, simple)
+  if (fx.burst) {
+    fx.group.remove(fx.burst.points);
+    fx.burst = null;
+  }
+
+  const count = 96;
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const u = Math.random();
+    const r = 0.15 + Math.random() * 0.55;
+    const y = (Math.random() - 0.1) * 0.35;
+    positions[i * 3 + 0] = Math.cos(a) * r;
+    positions[i * 3 + 1] = y;
+    positions[i * 3 + 2] = Math.sin(a) * r;
+
+    const sp = 2.6 + Math.random() * 5.4;
+    velocities[i * 3 + 0] = Math.cos(a) * sp;
+    velocities[i * 3 + 1] = (Math.random() * 1.1 + 0.2) * sp;
+    velocities[i * 3 + 2] = Math.sin(a) * sp;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({
+    color: 0xfff0b5,
+    size: 0.14,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const points = new THREE.Points(geo, mat);
+
+  const followerZ = actors.butcher.root?.position.z ?? actors.garrosh.root?.position.z ?? camera.position.z;
+  points.position.set(0, 2.0, followerZ - 6.0);
+  fx.group.add(points);
+
+  fx.burst = { points, velocities, life: 0.95, ttl: 0.95 };
+}
+
+function updateRunBlast(dt) {
+  if (!fx.burst) return;
+  fx.burst.life -= dt;
+  if (fx.burst.life <= 0) {
+    fx.group.remove(fx.burst.points);
+    fx.burst = null;
+    return;
+  }
+
+  const geo = fx.burst.points.geometry;
+  const attr = geo.getAttribute("position");
+  const p = attr.array;
+  const v = fx.burst.velocities;
+  for (let i = 0; i < p.length; i += 3) {
+    p[i + 0] += v[i + 0] * dt;
+    p[i + 1] += v[i + 1] * dt;
+    p[i + 2] += v[i + 2] * dt;
+    v[i + 0] *= 0.985;
+    v[i + 1] *= 0.975;
+    v[i + 2] *= 0.985;
+  }
+  attr.needsUpdate = true;
+
+  const t = 1 - fx.burst.life / fx.burst.ttl;
+  fx.burst.points.material.opacity = 0.9 * (1 - t);
+}
+
+function triggerRunStartFX() {
+  if (!FX.enabled) return;
+  triggerBirdFlyover();
+
+  if (!prefersReducedMotion && FX.angelBurstOnRunStart) {
+    spawnHaloAt(actors.garrosh.root);
+    spawnHaloAt(actors.butcher.root);
+    spawnRunBlast();
+  }
+}
+
+// --- Victory meat rain ---
+function startVictoryMeatRain(seconds = 3.6) {
+  if (!FX.enabled || prefersReducedMotion || !FX.victoryMeatRain) return;
+  fx.victoryRainUntil = last + Math.max(0.2, seconds);
+  fx.victoryRainAcc = 0;
+}
+
+function updateVictoryMeatRain(dt) {
+  if (fx.victoryRainUntil <= 0) return;
+  if (last > fx.victoryRainUntil) {
+    fx.victoryRainUntil = 0;
+    return;
+  }
+
+  // Spawn above and slightly ahead of the leaders.
+  const g = actors.garrosh.root;
+  const b = actors.butcher.root;
+  const followerZ = b?.position.z ?? 0;
+  const leaderZ = g?.position.z ?? followerZ - MOVE.followerGapZ;
+
+  fx.victoryRainAcc += dt * 46;
+  while (fx.victoryRainAcc >= 1) {
+    fx.victoryRainAcc -= 1;
+    const x = (Math.random() - 0.5) * (ROAD.width * 1.15);
+    const y = 16 + Math.random() * 10;
+    const z = leaderZ - (12 + Math.random() * 22);
+    spawnMeatAt(x, y, z, {
+      mode: "fall",
+      vy: 10 + Math.random() * 10,
+      vx: (Math.random() - 0.5) * 0.8,
+      vz: -(Math.random() * 1.6),
+      life: 3.2 + Math.random() * 1.2,
+    });
+  }
+}
 
 const meatIcon3d = {
   renderer: null,
@@ -630,19 +886,29 @@ function collectMeatItem(item) {
       const followerZ = b?.position.z ?? 0;
       const leaderZ = g?.position.z ?? followerZ - MOVE.followerGapZ;
 
-      const burstCount = 34;
-      for (let i = 0; i < burstCount; i++) {
-        const x = (Math.random() - 0.5) * 6.5;
-        const y = 1.0 + Math.random() * 1.3;
-        const z = leaderZ - (10 + Math.random() * 14);
-        spawnMeatAt(x, y, z, {
-          mode: "burst",
-          vy: -(9 + Math.random() * 10),
-          vx: (Math.random() - 0.5) * 3.0,
-          vz: -(Math.random() * 4.0),
-          life: 2.4 + Math.random() * 0.8,
-        });
+      const burstCount = prefersReducedMotion ? 34 : 64;
+      const doBurst = (count, spreadMul = 1) => {
+        for (let i = 0; i < count; i++) {
+          const x = (Math.random() - 0.5) * 6.5 * spreadMul;
+          const y = 1.0 + Math.random() * 1.5;
+          const z = leaderZ - (10 + Math.random() * 16);
+          spawnMeatAt(x, y, z, {
+            mode: "burst",
+            vy: -(10 + Math.random() * 12),
+            vx: (Math.random() - 0.5) * 3.6 * spreadMul,
+            vz: -(Math.random() * 4.6),
+            life: 2.6 + Math.random() * 0.9,
+          });
+        }
+      };
+
+      doBurst(burstCount, 1);
+      if (!prefersReducedMotion) {
+        window.setTimeout(() => doBurst(38, 1.15), 260);
+        window.setTimeout(() => doBurst(34, 1.25), 520);
       }
+
+      startVictoryMeatRain(4.0);
     }
   }
 }
@@ -924,6 +1190,8 @@ function setAll(mode) {
       }
     }
   }
+
+  if (mode === "run") triggerRunStartFX();
 }
 
 async function loadActor(key, url, fallbackColor) {
@@ -993,6 +1261,12 @@ function frame(t) {
   updateFollowCamera();
   updateRoad();
   updateMeat(dt);
+  if (FX.enabled) {
+    updateBirds(dt);
+    updateHalos(dt);
+    updateRunBlast(dt);
+    updateVictoryMeatRain(dt);
+  }
 
   renderer.render(scene, camera);
 

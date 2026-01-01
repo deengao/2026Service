@@ -237,6 +237,7 @@ body {
 }
 
 .victoryCard {
+  position: relative;
   display: grid;
   justify-items: center;
   text-align: center;
@@ -244,6 +245,21 @@ body {
   border-radius: 18px;
   background: rgba(0, 0, 0, 0.00);
   animation: popIn 420ms cubic-bezier(.2, .9, .25, 1.2) both;
+}
+
+.victoryCard::before {
+  content: "";
+  position: absolute;
+  inset: -24px;
+  border-radius: 26px;
+  pointer-events: none;
+  background:
+    radial-gradient(220px 160px at 20% 25%, rgba(255, 214, 102, 0.16), transparent 60%),
+    radial-gradient(240px 180px at 80% 30%, rgba(255, 179, 71, 0.14), transparent 62%),
+    radial-gradient(220px 180px at 50% 80%, rgba(167, 139, 250, 0.10), transparent 62%);
+  filter: blur(0.4px);
+  opacity: 0;
+  animation: victorySparkle 1.35s ease-in-out infinite;
 }
 
 .victoryTop {
@@ -262,6 +278,14 @@ body {
   text-shadow: 0 18px 30px rgba(0, 0, 0, 0.36);
 }
 
+.victoryNote {
+  margin-top: 6px;
+  color: rgba(255, 214, 102, 0.92);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-shadow: 0 16px 28px rgba(0, 0, 0, 0.32);
+}
+
 .victorySub {
   margin-top: 6px;
   color: var(--muted);
@@ -272,6 +296,12 @@ body {
 @keyframes popIn {
   0% { opacity: 0; transform: translateY(10px) scale(0.92); }
   100% { opacity: 1; transform: translateY(0px) scale(1); }
+}
+
+@keyframes victorySparkle {
+  0% { opacity: 0.08; transform: scale(0.98) rotate(-0.6deg); }
+  50% { opacity: 0.50; transform: scale(1.02) rotate(0.6deg); }
+  100% { opacity: 0.08; transform: scale(0.98) rotate(-0.6deg); }
 }
 
 .meatCounter.isHidden {

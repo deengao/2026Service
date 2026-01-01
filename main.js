@@ -23,21 +23,22 @@ const VIEW = {
 };
 
 const MOVE = {
-  walkSpeed: 0.55,
-  runSpeed: 4.7,
+  walkSpeed: 1.6,
+  runSpeed: 14.0,
   // Garrosh leads (more negative Z); Butcher follows behind.
-  followerGapZ: 3.6,
-  // Slight lane split so Garrosh is visible (not blocked behind Butcher).
-  leaderX: -1.4,
-  followerX: 1.4,
+  followerGapZ: 4.8,
+  // Keep the road single-lane; separate characters slightly for visibility.
+  leaderX: -1.6,
+  followerX: 0.4,
   wrapFollowerZ: -60,
   resetFollowerZ: 10,
 
   // Camera: farther behind + a bit above
   cameraBehind: 15.5,
   cameraUp: 5.2,
-  cameraSide: 1.1,
-  lookAhead: 2.6,
+  // Negative side = camera sits on left side looking in.
+  cameraSide: -1.6,
+  lookAhead: 3.4,
 };
 
 const ANIM = {
@@ -57,8 +58,8 @@ const CAMERA = {
   run: {
     behind: 28.0,
     up: 9.0,
-    side: 1.8,
-    lookAhead: 9.0,
+    side: -2.2,
+    lookAhead: 11.0,
     fov: 68,
   },
   // Smoothness of the camera transition (higher = faster)
@@ -459,26 +460,17 @@ function makeRoadSegment() {
   asphalt.receiveShadow = true;
   g.add(asphalt);
 
-  // Long ruts + patches (no cross-road stripes)
-  const rutMat = new THREE.MeshStandardMaterial({ color: 0x5c4a31, roughness: 1.0, metalness: 0.0 });
-  const rutGeo = new THREE.BoxGeometry(0.55, 0.02, ROAD.segLength * 0.96);
-  const rutOffsets = [-ROAD.width * 0.18, ROAD.width * 0.18];
-  for (const x of rutOffsets) {
-    const rut = new THREE.Mesh(rutGeo, rutMat);
-    rut.receiveShadow = true;
-    rut.position.set(x, 0.13, 0);
-    g.add(rut);
-  }
-
-  const patchMat = new THREE.MeshStandardMaterial({ color: 0x6a5336, roughness: 1.0, metalness: 0.0 });
-  for (let i = 0; i < 6; i++) {
-    const w = 0.7 + Math.random() * 1.6;
-    const l = 1.6 + Math.random() * 4.2;
-    const patch = new THREE.Mesh(new THREE.BoxGeometry(w, 0.015, l), patchMat);
-    patch.receiveShadow = true;
-    patch.position.set((Math.random() - 0.5) * (ROAD.width * 0.8), 0.12, (Math.random() - 0.5) * (ROAD.segLength * 0.75));
-    patch.rotation.y = (Math.random() - 0.5) * 0.22;
-    g.add(patch);
+  // Full-width worn patches (avoid ruts that read as lanes)
+  const wearMat = new THREE.MeshStandardMaterial({ color: 0x6a5336, roughness: 1.0, metalness: 0.0 });
+  const wearCount = 5;
+  for (let i = 0; i < wearCount; i++) {
+    const w = ROAD.width * (0.82 + Math.random() * 0.14);
+    const l = 1.6 + Math.random() * 4.8;
+    const wear = new THREE.Mesh(new THREE.BoxGeometry(w, 0.015, l), wearMat);
+    wear.receiveShadow = true;
+    wear.position.set(0, 0.12, (Math.random() - 0.5) * (ROAD.segLength * 0.78));
+    wear.rotation.y = (Math.random() - 0.5) * 0.06;
+    g.add(wear);
   }
 
   return g;
@@ -738,7 +730,8 @@ function updateVictoryMeatRain(dt) {
   const followerZ = b?.position.z ?? 0;
   const leaderZ = g?.position.z ?? followerZ - MOVE.followerGapZ;
 
-  fx.victoryRainAcc += dt * 46;
+  // Keep this light: too many extra meshes can hurt framerate.
+  fx.victoryRainAcc += dt * 16;
   while (fx.victoryRainAcc >= 1) {
     fx.victoryRainAcc -= 1;
     const x = (Math.random() - 0.5) * (ROAD.width * 1.15);
@@ -749,7 +742,7 @@ function updateVictoryMeatRain(dt) {
       vy: 10 + Math.random() * 10,
       vx: (Math.random() - 0.5) * 0.8,
       vz: -(Math.random() * 1.6),
-      life: 3.2 + Math.random() * 1.2,
+      life: 2.4 + Math.random() * 0.9,
     });
   }
 }
@@ -934,7 +927,7 @@ function collectMeatItem(item) {
         window.setTimeout(() => doBurst(34, 1.25), 520);
       }
 
-      startVictoryMeatRain(4.0);
+      startVictoryMeatRain(2.6);
     }
   }
 }

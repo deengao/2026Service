@@ -99,6 +99,14 @@ const MEAT_COUNTER = {
   max: 200,
 };
 
+const COMBO = {
+  enabled: true,
+  timeWindow: 1.5, // seconds to maintain combo
+  maxMultiplier: 10,
+  goldenChance: 0.08, // 8% chance for golden meat
+  goldenMultiplier: 5, // golden meat worth 5x
+};
+
 const AUDIO = {
   enabled: true,
   volume: 0.9,
@@ -156,7 +164,47 @@ const ui = {
   meatCountNum: document.getElementById("meatCountNum"),
   meatIcon: document.getElementById("meatIcon"),
   victory: document.getElementById("victory"),
+  comboDisplay: null, // Created dynamically
 };
+
+// Create combo display UI dynamically
+function createComboUI() {
+  const comboDiv = document.createElement('div');
+  comboDiv.id = 'comboDisplay';
+  comboDiv.className = 'isHidden';
+  comboDiv.innerHTML = '<span id="comboCount">0</span><span id="comboLabel">x COMBO!</span>';
+  comboDiv.style.cssText = `
+    position: fixed;
+    top: 120px;
+    right: 24px;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 28px;
+    font-weight: bold;
+    color: #fff;
+    text-shadow: 0 0 10px #ff6b00, 0 0 20px #ff6b00, 2px 2px 4px rgba(0,0,0,0.5);
+    z-index: 100;
+    pointer-events: none;
+    transition: transform 0.1s ease-out, opacity 0.3s;
+    opacity: 0;
+  `;
+  document.body.appendChild(comboDiv);
+  ui.comboDisplay = comboDiv;
+  
+  // Add floating scores container
+  const scoresContainer = document.createElement('div');
+  scoresContainer.id = 'floatingScores';
+  scoresContainer.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 99;
+    overflow: hidden;
+  `;
+  document.body.appendChild(scoresContainer);
+}
 
 const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
 
@@ -222,6 +270,104 @@ function bumpMeatCounter() {
   ui.meatCounter.classList.add("bump");
   if (meatBumpTimer) window.clearTimeout(meatBumpTimer);
   meatBumpTimer = window.setTimeout(() => ui.meatCounter?.classList.remove("bump"), 140);
+}
+
+function updateComboDisplay() {
+  if (!ui.comboDisplay) return;
+  const countEl = ui.comboDisplay.querySelector('#comboCount');
+  if (countEl) countEl.textContent = comboState.count;
+  
+  if (comboState.count >= 2) {
+    ui.comboDisplay.classList.remove('isHidden');
+    ui.comboDisplay.style.opacity = '1';
+    ui.comboDisplay.style.transform = 'scale(1.15)';
+    setTimeout(() => {
+      if (ui.comboDisplay) ui.comboDisplay.style.transform = 'scale(1)';
+    }, 100);
+    
+    // Color based on combo level
+    if (comboState.count >= 8) {
+      ui.comboDisplay.style.textShadow = '0 0 10px #ff00ff, 0 0 20px #ff00ff, 0 0 30px #ff00ff';
+    } else if (comboState.count >= 5) {
+      ui.comboDisplay.style.textShadow = '0 0 10px #ffff00, 0 0 20px #ffff00, 2px 2px 4px rgba(0,0,0,0.5)';
+    } else {
+      ui.comboDisplay.style.textShadow = '0 0 10px #ff6b00, 0 0 20px #ff6b00, 2px 2px 4px rgba(0,0,0,0.5)';
+    }
+  } else {
+    ui.comboDisplay.style.opacity = '0';
+  }
+}
+
+function resetCombo() {
+  comboState.count = 0;
+  comboState.multiplier = 1;
+  comboState.timer = 0;
+  updateComboDisplay();
+}
+
+function incrementCombo() {
+  comboState.count++;
+  comboState.multiplier = Math.min(COMBO.maxMultiplier, 1 + Math.floor(comboState.count / 3));
+  comboState.timer = COMBO.timeWindow;
+  comboState.lastCollectTime = performance.now();
+  updateComboDisplay();
+}
+
+function updateComboTimer(dt) {
+  if (!COMBO.enabled) return;
+  if (comboState.timer > 0) {
+    comboState.timer -= dt;
+    if (comboState.timer <= 0) {
+      resetCombo();
+    }
+  }
+}
+
+function spawnFloatingScore(x, y, value, isGolden = false, comboMult = 1) {
+  const container = document.getElementById('floatingScores');
+  if (!container) return;
+  
+  const scoreEl = document.createElement('div');
+  let displayText = `+${value}`;
+  if (comboMult > 1) displayText += ` x${comboMult}`;
+  if (isGolden) displayText = '⭐ ' + displayText + ' ⭐';
+  
+  scoreEl.textContent = displayText;
+  scoreEl.style.cssText = `
+    position: absolute;
+    left: ${x}px;
+    top: ${y}px;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: ${isGolden ? '32px' : '24px'};
+    font-weight: bold;
+    color: ${isGolden ? '#ffd700' : '#fff'};
+    text-shadow: ${isGolden ? '0 0 15px #ffd700, 0 0 25px #ff6b00' : '0 0 8px rgba(255,107,0,0.8)'}, 2px 2px 4px rgba(0,0,0,0.7);
+    pointer-events: none;
+    animation: floatUp 1.2s ease-out forwards;
+    z-index: 101;
+  `;
+  container.appendChild(scoreEl);
+  
+  // Remove after animation
+  setTimeout(() => scoreEl.remove(), 1200);
+}
+
+// Add CSS animation for floating scores
+function addFloatingScoreStyles() {
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes floatUp {
+      0% { transform: translateY(0) scale(0.5); opacity: 0; }
+      20% { transform: translateY(-20px) scale(1.2); opacity: 1; }
+      100% { transform: translateY(-100px) scale(0.8); opacity: 0; }
+    }
+    @keyframes particleBurst {
+      0% { transform: scale(0); opacity: 1; }
+      50% { opacity: 0.8; }
+      100% { transform: scale(2); opacity: 0; }
+    }
+  `;
+  document.head.appendChild(style);
 }
 
 function onUserGesture() {
@@ -399,15 +545,17 @@ renderer.setPixelRatio(isMobile ? Math.min(1.5, window.devicePixelRatio || 1) : 
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
-renderer.shadowMap.enabled = !isMobile; // Disable shadows on mobile
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Enable shadows on mobile too, but with lower quality
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = isMobile ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
 
 scene.add(new THREE.HemisphereLight(0xbfe7ff, 0x2f6b2f, 0.85));
 scene.add(new THREE.AmbientLight(0xffffff, 0.35));
 const sun = new THREE.DirectionalLight(0xffffff, 1.05);
 sun.position.set(10, 16, 10);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
+// Lower shadow map resolution on mobile for performance
+sun.shadow.mapSize.set(isMobile ? 512 : 1024, isMobile ? 512 : 1024);
 sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 80;
 sun.shadow.camera.left = -22;
@@ -515,6 +663,20 @@ scene.add(meat.group);
 let meatCount = 0;
 let celebrated200 = false;
 
+// Combo system state
+const comboState = {
+  count: 0,
+  multiplier: 1,
+  timer: 0,
+  lastCollectTime: 0,
+};
+
+// Floating score pop-ups
+const floatingScores = [];
+
+// Collection particles
+const collectParticles = [];
+
 const FX = {
   enabled: true,
   birdsOnRunStart: true,
@@ -604,11 +766,11 @@ const hopeCross = {
 function createHopeCross() {
   const group = new THREE.Group();
   
-  // Cross made of glowing materials
+  // Cross made of bright white glowing materials
   const crossMat = new THREE.MeshBasicMaterial({
-    color: 0xffd700,
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.9,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
@@ -625,11 +787,11 @@ function createHopeCross() {
   horizontal.position.y = 6;
   group.add(horizontal);
   
-  // Inner glow (brighter core)
+  // Inner glow (pure white core)
   const glowCoreMat = new THREE.MeshBasicMaterial({
-    color: 0xffffee,
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.95,
+    opacity: 1.0,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
@@ -640,33 +802,47 @@ function createHopeCross() {
   hCore.position.y = 6;
   group.add(hCore);
   
-  // Outer glow halo around cross
+  // Outer glow halo around cross (bright white)
   const haloMat = new THREE.MeshBasicMaterial({
-    color: 0xfff0aa,
+    color: 0xffffff,
     transparent: true,
-    opacity: 0.25,
+    opacity: 0.3,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  const halo = new THREE.Mesh(new THREE.CircleGeometry(12, 32), haloMat);
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(14, 32), haloMat);
   halo.position.y = 5.5;
   halo.position.z = -0.5;
   group.add(halo);
   
-  // Light rays emanating from cross
-  const rayMat = new THREE.MeshBasicMaterial({
-    color: 0xffd866,
+  // Second larger halo for more glow
+  const halo2Mat = new THREE.MeshBasicMaterial({
+    color: 0xeeffff,
     transparent: true,
-    opacity: 0.18,
+    opacity: 0.15,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const halo2 = new THREE.Mesh(new THREE.CircleGeometry(22, 32), halo2Mat);
+  halo2.position.y = 5.5;
+  halo2.position.z = -0.8;
+  group.add(halo2);
+  
+  // Light rays emanating from cross (bright white)
+  const rayMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.22,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
-  const rayCount = 12;
+  const rayCount = 16;
   for (let i = 0; i < rayCount; i++) {
     const angle = (i / rayCount) * Math.PI * 2;
-    const rayLen = 15 + Math.random() * 8;
-    const rayGeo = new THREE.PlaneGeometry(0.6, rayLen);
+    const rayLen = 18 + Math.random() * 10;
+    const rayGeo = new THREE.PlaneGeometry(0.5, rayLen);
     const ray = new THREE.Mesh(rayGeo, rayMat.clone());
     ray.position.y = 5.5;
     ray.position.z = -0.3;
@@ -676,8 +852,8 @@ function createHopeCross() {
     group.add(ray);
   }
   
-  // Point light for actual illumination
-  const pointLight = new THREE.PointLight(0xffd700, 0, 60);
+  // Point light for actual illumination (bright white)
+  const pointLight = new THREE.PointLight(0xffffff, 0, 80);
   pointLight.position.set(0, 5.5, 0);
   group.add(pointLight);
   group.userData.pointLight = pointLight;
@@ -877,6 +1053,83 @@ function startVictoryMeatRain(seconds = 3.6) {
   fx.victoryRainAcc = 0;
 }
 
+// Collection particle burst in 3D
+function spawnCollectParticles(x, y, z, isGolden = false) {
+  if (prefersReducedMotion) return;
+  
+  const count = isGolden ? 24 : 12;
+  const color = isGolden ? 0xffd700 : 0xff6b00;
+  
+  const positions = new Float32Array(count * 3);
+  const velocities = new Float32Array(count * 3);
+  
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = x;
+    positions[i * 3 + 1] = y;
+    positions[i * 3 + 2] = z;
+    
+    const angle = Math.random() * Math.PI * 2;
+    const upAngle = Math.random() * Math.PI - Math.PI * 0.3;
+    const speed = 3 + Math.random() * 5;
+    velocities[i * 3] = Math.cos(angle) * Math.cos(upAngle) * speed;
+    velocities[i * 3 + 1] = Math.sin(upAngle) * speed + 2;
+    velocities[i * 3 + 2] = Math.sin(angle) * Math.cos(upAngle) * speed;
+  }
+  
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  
+  const mat = new THREE.PointsMaterial({
+    color: color,
+    size: isGolden ? 0.25 : 0.18,
+    transparent: true,
+    opacity: 1,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  
+  collectParticles.push({
+    points,
+    velocities,
+    life: 0.8,
+    ttl: 0.8,
+    gravity: -15,
+  });
+}
+
+function updateCollectParticles(dt) {
+  for (let i = collectParticles.length - 1; i >= 0; i--) {
+    const p = collectParticles[i];
+    p.life -= dt;
+    
+    if (p.life <= 0) {
+      scene.remove(p.points);
+      p.points.geometry.dispose();
+      p.points.material.dispose();
+      collectParticles.splice(i, 1);
+      continue;
+    }
+    
+    const attr = p.points.geometry.getAttribute('position');
+    const pos = attr.array;
+    const vel = p.velocities;
+    
+    for (let j = 0; j < pos.length; j += 3) {
+      vel[j + 1] += p.gravity * dt; // gravity
+      pos[j] += vel[j] * dt;
+      pos[j + 1] += vel[j + 1] * dt;
+      pos[j + 2] += vel[j + 2] * dt;
+    }
+    attr.needsUpdate = true;
+    
+    // Fade out
+    p.points.material.opacity = p.life / p.ttl;
+  }
+}
+
 function updateVictoryMeatRain(dt) {
   if (fx.victoryRainUntil <= 0) return;
   if (last > fx.victoryRainUntil) {
@@ -1042,14 +1295,36 @@ function tagMeatForPicking(root, item) {
 function collectMeatItem(item) {
   if (!MEAT_COUNTER.enabled) return;
   if (!item || !item.active) return;
-  if (meatCount >= MEAT_COUNTER.max) return;
 
   dismissTapHint();
+  
+  // Get screen position for floating score
+  const meshPos = item.mesh.position.clone();
+  const screenPos = meshPos.project(camera);
+  const rect = ui.canvas.getBoundingClientRect();
+  const screenX = (screenPos.x * 0.5 + 0.5) * rect.width + rect.left;
+  const screenY = (-screenPos.y * 0.5 + 0.5) * rect.height + rect.top;
+  
+  // Spawn 3D particles at meat location
+  spawnCollectParticles(meshPos.x, meshPos.y, meshPos.z, item.isGolden);
 
   item.active = false;
   item.mesh.visible = false;
-
-  const add = Math.min(randInt(1, 30), MEAT_COUNTER.max - meatCount);
+  
+  // Increment combo
+  if (COMBO.enabled) {
+    incrementCombo();
+  }
+  
+  // Calculate score with golden bonus and combo multiplier
+  let baseValue = randInt(1, 30);
+  if (item.isGolden) baseValue *= COMBO.goldenMultiplier;
+  const finalValue = baseValue * comboState.multiplier;
+  const add = finalValue;
+  
+  // Spawn floating score
+  spawnFloatingScore(screenX, screenY, add, item.isGolden, comboState.multiplier > 1 ? comboState.multiplier : 0);
+  
   meatCount += add;
   setMeatCount(meatCount);
   bumpMeatCounter();
@@ -1100,7 +1375,6 @@ function collectClosestMeatFallback() {
 function onCanvasTapCollect(e) {
   if (!MEAT_COUNTER.enabled) return;
   if (moveMode !== "run") return;
-  if (meatCount >= MEAT_COUNTER.max) return;
 
   // Any tap attempt during run counts as "got it".
   dismissTapHint();
@@ -1147,7 +1421,15 @@ function spawnMeatAt(x, y, z, opts = undefined) {
         spin: new THREE.Vector3(),
         active: false,
         mode: "fall",
+        isGolden: false,
+        originalMaterials: [],
       };
+      // Store original materials for golden effect toggle
+      mesh.traverse((child) => {
+        if (child.isMesh && child.material) {
+          item.originalMaterials.push({ mesh: child, material: child.material.clone() });
+        }
+      });
       mesh.userData.__meatTagged = true;
       tagMeatForPicking(mesh, item);
       meat.pool.push(item);
@@ -1171,8 +1453,38 @@ function spawnMeatAt(x, y, z, opts = undefined) {
     randRange(MEAT.spinSpeedMin, MEAT.spinSpeedMax),
     randRange(MEAT.spinSpeedMin, MEAT.spinSpeedMax)
   );
-
+  
+  // Determine if this is a golden meat (rare, worth more)
+  item.isGolden = COMBO.enabled && Math.random() < COMBO.goldenChance;
+  
+  // Apply golden material effect
   const mesh = item.mesh;
+  mesh.traverse((child) => {
+    if (child.isMesh && child.material) {
+      if (item.isGolden) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: 0xffd700,
+          emissive: 0xff8c00,
+          emissiveIntensity: 0.4,
+          roughness: 0.3,
+          metalness: 0.8,
+        });
+      } else {
+        // Restore original material
+        const orig = item.originalMaterials?.find(m => m.mesh === child);
+        if (orig) child.material = orig.material.clone();
+      }
+    }
+  });
+  
+  // Golden meat is slightly larger and spins faster
+  if (item.isGolden) {
+    mesh.scale.setScalar(1.3);
+    item.spin.multiplyScalar(1.5);
+  } else {
+    mesh.scale.setScalar(1);
+  }
+
   mesh.visible = true;
   mesh.position.set(x, y, z);
   mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
@@ -1390,6 +1702,7 @@ function setAll(mode) {
     setMeatCount(0);
     setMeatCounterVisible(true);
     bumpMeatCounter();
+    resetCombo(); // Reset combo when starting new run
 
     tapHintDismissed = false;
     showTapHint();
@@ -1492,6 +1805,8 @@ function frame(t) {
   updateRoad();
   updateGround();
   updateMeat(dt);
+  updateComboTimer(dt);
+  updateCollectParticles(dt);
   if (FX.enabled) {
     updateBirds(dt);
     updateHalos(dt);
@@ -1538,6 +1853,10 @@ async function runScript(script) {
 async function boot() {
   resize();
   window.addEventListener("resize", resize);
+  
+  // Initialize combo UI
+  createComboUI();
+  addFloatingScoreStyles();
 
   setLoading(true, "Loading…");
   setText("Loading…", "Preparing the scene.");

@@ -69,14 +69,19 @@ const CAMERA = {
 const ROAD = {
   width: 7.0,
   segLength: 14.0,
-  segCount: 10,
+  segCount: 24, // More segments for full road coverage ahead and behind
+  aheadCount: 16, // How many segments should be ahead of the runner
 };
+
+// Detect if running on mobile for performance optimization
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
+  || (window.innerWidth <= 768);
 
 const MEAT = {
   enabled: true,
-  // Spawn only while running
-  spawnPerSecond: 14,
-  maxCount: 140,
+  // Spawn only while running - reduced for mobile
+  spawnPerSecond: isMobile ? 6 : 10,
+  maxCount: isMobile ? 40 : 80,
   spawnHalfWidth: 6.5,
   spawnHeight: 14,
   spawnHeightJitter: 10,
@@ -385,15 +390,16 @@ const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 200);
 
 const renderer = new THREE.WebGLRenderer({
   canvas: ui.canvas,
-  antialias: true,
+  antialias: !isMobile, // Disable antialiasing on mobile for performance
   alpha: true,
   powerPreference: "high-performance",
 });
-renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+// Lower pixel ratio on mobile for better performance
+renderer.setPixelRatio(isMobile ? Math.min(1.5, window.devicePixelRatio || 1) : Math.min(2, window.devicePixelRatio || 1));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !isMobile; // Disable shadows on mobile
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 scene.add(new THREE.HemisphereLight(0xbfe7ff, 0x2f6b2f, 0.85));
@@ -435,13 +441,19 @@ sunHalo.position.copy(sunCore.position);
 scene.add(sunHalo);
 
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(260, 260),
+  new THREE.PlaneGeometry(500, 500),
   new THREE.MeshStandardMaterial({ color: 0x2f7a35, roughness: 1.0, metalness: 0.0 })
 );
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = 0;
 ground.receiveShadow = true;
 scene.add(ground);
+
+// Function to update ground position to follow characters
+function updateGround() {
+  const runnerZ = actors.butcher.root?.position.z ?? actors.garrosh.root?.position.z ?? 0;
+  ground.position.z = runnerZ;
+}
 
 // Endless road (recycled segments)
 const roadGroup = new THREE.Group();
@@ -1100,18 +1112,26 @@ const camRuntime = {
   fov: CAMERA.walk.fov,
 };
 
+// Store dt for camera update (passed from frame function)
+let frameDt = 0;
+
+// Store previous target for smooth camera movement
+const camTarget = new THREE.Vector3();
+let camTargetInit = false;
+
 function updateFollowCamera() {
   const g = actors.garrosh.root;
   const b = actors.butcher.root;
   if (!g && !b) return;
 
   const preset = moveMode === "run" ? CAMERA.run : CAMERA.walk;
-  const k = CAMERA.blend;
-  camRuntime.behind += (preset.behind - camRuntime.behind) * k;
-  camRuntime.up += (preset.up - camRuntime.up) * k;
-  camRuntime.side += (preset.side - camRuntime.side) * k;
-  camRuntime.lookAhead += (preset.lookAhead - camRuntime.lookAhead) * k;
-  camRuntime.fov += (preset.fov - camRuntime.fov) * k;
+  // Frame-rate independent smoothing: use exponential decay
+  const smoothFactor = 1 - Math.exp(-CAMERA.blend * 60 * frameDt);
+  camRuntime.behind += (preset.behind - camRuntime.behind) * smoothFactor;
+  camRuntime.up += (preset.up - camRuntime.up) * smoothFactor;
+  camRuntime.side += (preset.side - camRuntime.side) * smoothFactor;
+  camRuntime.lookAhead += (preset.lookAhead - camRuntime.lookAhead) * smoothFactor;
+  camRuntime.fov += (preset.fov - camRuntime.fov) * smoothFactor;
 
   if (Math.abs(camera.fov - camRuntime.fov) > 0.01) {
     camera.fov = camRuntime.fov;
@@ -1124,11 +1144,28 @@ function updateFollowCamera() {
   const xMid = ((g?.position.x ?? 0) + (b?.position.x ?? 0)) * 0.5;
   const zMid = (leaderZ + followerZ) * 0.5;
 
-  const desiredPos = new THREE.Vector3(xMid + camRuntime.side, camRuntime.up, followerZ + camRuntime.behind);
-  camera.position.lerp(desiredPos, 0.08);
+  // Camera follows directly - no lerp on Z axis to prevent back-and-forth
+  // Only smooth the X and Y (side and height) transitions
+  const desiredX = xMid + camRuntime.side;
+  const desiredY = camRuntime.up;
+  const desiredZ = followerZ + camRuntime.behind;
+  
+  const camSmooth = 1 - Math.exp(-8 * frameDt);
+  camera.position.x += (desiredX - camera.position.x) * camSmooth;
+  camera.position.y += (desiredY - camera.position.y) * camSmooth;
+  // Z follows directly to stay locked with the characters
+  camera.position.z = desiredZ;
 
   const desiredTarget = new THREE.Vector3(xMid, 1.6 + VIEW.targetYOffset, zMid - camRuntime.lookAhead);
-  camera.lookAt(desiredTarget);
+  
+  // Smooth the look-at target to avoid jitter
+  if (!camTargetInit) {
+    camTarget.copy(desiredTarget);
+    camTargetInit = true;
+  } else {
+    camTarget.lerp(desiredTarget, camSmooth);
+  }
+  camera.lookAt(camTarget);
 }
 
 let moveMode = null;
@@ -1141,32 +1178,45 @@ function updateForwardMotion(dt) {
   if (g && b) g.position.z = b.position.z - MOVE.followerGapZ;
   else if (g) g.position.z -= speed * dt;
 
-  // Keep their spacing constant and wrap using the follower (Butcher).
-  if (g && b) {
-    if (b.position.z < MOVE.wrapFollowerZ) {
-      b.position.z = MOVE.resetFollowerZ;
-      g.position.z = b.position.z - MOVE.followerGapZ;
-    }
-  }
+  // No wrapping needed - characters run infinitely, road segments recycle around them
 }
 
 function updateRoad() {
-  // Recycle road segments based on the runner position (stable even when the camera zooms).
+  // Recycle road segments based on the runner position
   const runnerZ = actors.butcher.root?.position.z ?? actors.garrosh.root?.position.z ?? camera.position.z;
-  // We'll keep segments ahead (more negative) of the camera.
+  
+  // Target: road should extend from (runnerZ + some behind) to (runnerZ - aheadDistance)
+  const aheadDistance = ROAD.aheadCount * ROAD.segLength;
+  const targetFrontZ = runnerZ - aheadDistance;
+  
+  // Find current front and back of road
   let minZ = Infinity;
   let maxZ = -Infinity;
   for (const seg of roadSegments) {
     minZ = Math.min(minZ, seg.position.z);
     maxZ = Math.max(maxZ, seg.position.z);
   }
-
-  // If a segment is far behind the runner, move it forward (more negative) to extend the road.
+  
+  // Recycle segments from behind to the front
   for (const seg of roadSegments) {
-    if (seg.position.z > runnerZ + ROAD.segLength * 1.2) {
+    // If this segment is too far behind the runner
+    if (seg.position.z > runnerZ + ROAD.segLength * 2) {
+      // Move it to extend the front
+      minZ = Math.min(...roadSegments.map(s => s.position.z));
       seg.position.z = minZ - ROAD.segLength;
-      minZ = seg.position.z;
     }
+  }
+  
+  // Also ensure road extends far enough ahead
+  minZ = Math.min(...roadSegments.map(s => s.position.z));
+  while (minZ > targetFrontZ) {
+    // Find the segment furthest behind and move it forward
+    let maxSeg = roadSegments[0];
+    for (const seg of roadSegments) {
+      if (seg.position.z > maxSeg.position.z) maxSeg = seg;
+    }
+    maxSeg.position.z = minZ - ROAD.segLength;
+    minZ = maxSeg.position.z;
   }
 }
 
@@ -1274,17 +1324,25 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
-let last = 0;
+let last = -1;
 function frame(t) {
   const now = t * 0.001;
+  // On the first frame, skip animation to avoid a large jump
+  if (last < 0) {
+    last = now;
+    requestAnimationFrame(frame);
+    return;
+  }
   const dt = Math.min(0.033, now - last);
   last = now;
 
   for (const m of mixers) m.update(dt);
 
   updateForwardMotion(dt);
+  frameDt = dt; // Store for camera update
   updateFollowCamera();
   updateRoad();
+  updateGround();
   updateMeat(dt);
   if (FX.enabled) {
     updateBirds(dt);

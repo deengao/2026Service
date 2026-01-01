@@ -520,6 +520,7 @@ const FX = {
   birdsOnRunStart: true,
   angelBurstOnRunStart: true,
   victoryMeatRain: true,
+  hopeCross: true, // Golden cross light ahead when running
 };
 
 const fx = {
@@ -590,6 +591,153 @@ function triggerBirdFlyover() {
     spawnBird({ x, y, z, vx, vz, ttl });
   }
 }
+
+// --- Hope Cross (golden light ahead when running) ---
+const hopeCross = {
+  group: null,
+  active: false,
+  targetOpacity: 0,
+  currentOpacity: 0,
+  phase: 0,
+};
+
+function createHopeCross() {
+  const group = new THREE.Group();
+  
+  // Cross made of glowing materials
+  const crossMat = new THREE.MeshBasicMaterial({
+    color: 0xffd700,
+    transparent: true,
+    opacity: 0.85,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  
+  // Vertical beam of the cross
+  const verticalGeo = new THREE.BoxGeometry(0.8, 8, 0.3);
+  const vertical = new THREE.Mesh(verticalGeo, crossMat);
+  vertical.position.y = 4;
+  group.add(vertical);
+  
+  // Horizontal beam of the cross
+  const horizontalGeo = new THREE.BoxGeometry(5, 0.8, 0.3);
+  const horizontal = new THREE.Mesh(horizontalGeo, crossMat);
+  horizontal.position.y = 6;
+  group.add(horizontal);
+  
+  // Inner glow (brighter core)
+  const glowCoreMat = new THREE.MeshBasicMaterial({
+    color: 0xffffee,
+    transparent: true,
+    opacity: 0.95,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const vCore = new THREE.Mesh(new THREE.BoxGeometry(0.4, 7.5, 0.15), glowCoreMat);
+  vCore.position.y = 4;
+  group.add(vCore);
+  const hCore = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.4, 0.15), glowCoreMat);
+  hCore.position.y = 6;
+  group.add(hCore);
+  
+  // Outer glow halo around cross
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0xfff0aa,
+    transparent: true,
+    opacity: 0.25,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(12, 32), haloMat);
+  halo.position.y = 5.5;
+  halo.position.z = -0.5;
+  group.add(halo);
+  
+  // Light rays emanating from cross
+  const rayMat = new THREE.MeshBasicMaterial({
+    color: 0xffd866,
+    transparent: true,
+    opacity: 0.18,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const rayCount = 12;
+  for (let i = 0; i < rayCount; i++) {
+    const angle = (i / rayCount) * Math.PI * 2;
+    const rayLen = 15 + Math.random() * 8;
+    const rayGeo = new THREE.PlaneGeometry(0.6, rayLen);
+    const ray = new THREE.Mesh(rayGeo, rayMat.clone());
+    ray.position.y = 5.5;
+    ray.position.z = -0.3;
+    ray.rotation.z = angle;
+    ray.position.x = Math.cos(angle) * 2;
+    ray.position.y = 5.5 + Math.sin(angle) * 2;
+    group.add(ray);
+  }
+  
+  // Point light for actual illumination
+  const pointLight = new THREE.PointLight(0xffd700, 0, 60);
+  pointLight.position.set(0, 5.5, 0);
+  group.add(pointLight);
+  group.userData.pointLight = pointLight;
+  
+  hopeCross.group = group;
+  scene.add(group);
+  group.visible = false;
+}
+
+function updateHopeCross(dt) {
+  if (!FX.enabled || !FX.hopeCross || !hopeCross.group) return;
+  
+  // Target opacity based on whether we're running
+  hopeCross.targetOpacity = moveMode === "run" ? 1 : 0;
+  
+  // Smooth fade in/out
+  const fadeSpeed = moveMode === "run" ? 1.5 : 3.0;
+  hopeCross.currentOpacity += (hopeCross.targetOpacity - hopeCross.currentOpacity) * fadeSpeed * dt;
+  
+  // Show/hide based on opacity
+  if (hopeCross.currentOpacity < 0.01) {
+    hopeCross.group.visible = false;
+    return;
+  }
+  
+  hopeCross.group.visible = true;
+  hopeCross.active = true;
+  
+  // Position ahead of the runners
+  const g = actors.garrosh.root;
+  const leaderZ = g?.position.z ?? 0;
+  hopeCross.group.position.set(0, 0, leaderZ - 85);
+  
+  // Pulsing/breathing effect
+  hopeCross.phase += dt * 1.2;
+  const pulse = 0.85 + Math.sin(hopeCross.phase) * 0.15;
+  const opacity = hopeCross.currentOpacity * pulse;
+  
+  // Update all materials' opacity
+  hopeCross.group.traverse((child) => {
+    if (child.material && child.material.opacity !== undefined) {
+      const baseOpacity = child.material.userData?.baseOpacity ?? child.material.opacity;
+      if (!child.material.userData) child.material.userData = {};
+      child.material.userData.baseOpacity = baseOpacity;
+      child.material.opacity = baseOpacity * opacity;
+    }
+  });
+  
+  // Update point light intensity
+  const light = hopeCross.group.userData.pointLight;
+  if (light) {
+    light.intensity = opacity * 2.5;
+  }
+  
+  // Gentle floating motion
+  hopeCross.group.position.y = Math.sin(hopeCross.phase * 0.7) * 0.8;
+}
+
+// Initialize hope cross
+createHopeCross();
 
 // --- Angel / halo + blast burst ---
 const haloGeo = new THREE.RingGeometry(0.38, 0.58, 24);
@@ -1349,6 +1497,7 @@ function frame(t) {
     updateHalos(dt);
     updateRunBlast(dt);
     updateVictoryMeatRain(dt);
+    updateHopeCross(dt);
   }
 
   renderer.render(scene, camera);

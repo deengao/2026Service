@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#070910" />
+    <title>Happy New Year 2026 Find Eat</title>
+    <meta name="description" content="Happy New Year 2026 Find Eat — Brothers and Sisters" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' x='6' font-size='44'%3E%F0%9F%8E%86%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="game" aria-label="Happy New Year 2026">
+      <canvas id="c" class="canvas" aria-label="3D canvas"></canvas>
+
+      <div id="loader" class="loader" role="status" aria-live="polite" aria-label="Loading">
+        <div class="loaderCard">
+          <div class="spinner" aria-hidden="true"></div>
+          <div id="loaderText" class="loaderText">Loading models…</div>
+        </div>
+      </div>
+
+      <div class="hud" aria-label="Message overlay">
+        <div class="header" aria-label="Greeting">
+          <div class="title">
+            <span class="titleTop">Happy New Year</span>
+            <span class="titleMain"><span class="year">2026</span></span>
+            <span class="titleTag">Find Eat</span>
+          </div>
+          <div class="subtitle">Brothers and Sisters</div>
+        </div>
+
+        <div class="crawlStage" aria-live="polite">
+          <div id="crawl" class="crawlText">
+            <div id="ref" class="ref">Loading…</div>
+            <div id="line" class="line">Preparing the message…</div>
+          </div>
+        </div>
+
+        <div id="soundHint" class="soundHint isHidden" aria-live="polite">
+          Tap anywhere to start sound
+        </div>
+
+        <div id="meatCounter" class="meatCounter isHidden" aria-live="polite" aria-label="Meat counter">
+          <canvas id="meatIcon" class="meatIcon" width="64" height="64" aria-hidden="true"></canvas>
+          <div class="meatCount">
+            <span id="meatCountNum">0</span>
+          </div>
+        </div>
+
+        <div id="victory" class="victory isHidden" aria-live="polite" aria-label="Victory message">
+          <div class="victoryCard">
+            <div class="victoryTop">LORD BLESSING</div>
+            <div class="victoryMain">FIND EAT 200 MEATS</div>
+            <div class="victorySub">IN 2026</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
